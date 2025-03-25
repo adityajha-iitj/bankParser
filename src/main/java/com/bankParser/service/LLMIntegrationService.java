@@ -62,7 +62,7 @@ public class LLMIntegrationService {
                     ))
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .map(response -> {
+                    .mapNotNull(response -> {
                         if (response.containsKey("candidates")) {
                             List<Map<String, Object>> candidates = (List<Map<String, Object>>) response.get("candidates");
                             if (!candidates.isEmpty()) {
@@ -101,7 +101,7 @@ public class LLMIntegrationService {
         Pattern namePattern = Pattern.compile("\"Full Name\":\\s*\"([^\"]+)\"");
         Pattern emailPattern = Pattern.compile("\"Email\":\\s*\"([^\"]+)\"");
 
-        // Updated regex to handle more complex number formats
+        // Updated regex to handle more complex and different number formats
         Pattern openingBalancePattern = Pattern.compile("\"Opening Balance\":\\s*\"?([\\d,]+(?:\\.\\d{2})?)\"?");
         Pattern closingBalancePattern = Pattern.compile("\"Closing Balance\":\\s*\"?([\\d,]+(?:\\.\\d{2})?)\"?");
 

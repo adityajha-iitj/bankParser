@@ -24,14 +24,14 @@ public class PDFParserService {
             String firstName,
             LocalDate dateOfBirth
     ) throws IOException {
-        // Send PDF to LLM
         logger.info("Parsing bank statement: firstName={}, dateOfBirth={}", firstName, dateOfBirth);
+
+        // Send PDF to LLM
+        BankStatementDTO statementDetails = llmService.extractBankStatementDetails(file);
 
         if (dateOfBirth == null) {
             logger.error("dateOfBirth is null in PDFParserService! Check if it's correctly passed from Controller.");
         }
-
-        BankStatementDTO statementDetails = llmService.extractBankStatementDetails(file);
 
         // Generate password if firstName and dateOfBirth provided
         if (firstName != null && dateOfBirth != null) {
