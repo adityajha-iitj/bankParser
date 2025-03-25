@@ -1,29 +1,37 @@
 package com.bankParser.service;
 
 import com.bankParser.model.BankStatementDTO;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
 public class LLMIntegrationService {
-    @Value("${OPENAI_API_KEY}")
-    private String openaiApiKey;
-
+    private static final Logger logger = LoggerFactory.getLogger(LLMIntegrationService.class);
 
     private final WebClient webClient;
+    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-    public LLMIntegrationService() {
-        this.webClient = WebClient.builder()
-                .baseUrl("https://api.openai.com/v1")
-                .defaultHeader("Authorization", "Bearer " + openaiApiKey)
+    public LLMIntegrationService(WebClient.Builder webClientBuilder) {
+        String geminiApiKey = System.getenv("GEMINI_API_KEY");
+        if (geminiApiKey == null || geminiApiKey.isEmpty()) {
+            throw new IllegalStateException("Missing GEMINI_API_KEY in environment variables.");
+        }
+
+        this.webClient = webClientBuilder
+                .baseUrl(GEMINI_API_URL + "?key=" + geminiApiKey)
+                .defaultHeader("Content-Type", "application/json")
                 .build();
     }
 
@@ -32,19 +40,52 @@ public class LLMIntegrationService {
                 "Full Name, Email, Opening Balance, Closing Balance, Account Number (last 4 digits)\n\n" +
                 "Bank Statement Text:\n" + extractedText;
 
-        String llmResponse = webClient.post()
-                .uri("/completions")
-                .bodyValue(Map.of(
-                        "model", "gpt-3.5-turbo",
-                        "prompt", prompt,
-                        "max_tokens", 250
-                ))
-                .retrieve()
-                .bodyToMono(Map.class)
-                .map(response -> (String) ((Map<String, Object>) ((Map<String, Object>) response.get("choices")).get(0)).get("text"))
-                .block();
+        try {
+            String llmResponse = webClient.post()
+                    .bodyValue(Map.of(
+                            "contents", new Object[]{
+                                    Map.of("parts", new Object[]{
+                                            Map.of("text", prompt)
+                                    })
+                            }
+                    ))
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .map(response -> {
+                        if (response.containsKey("candidates")) {
+                            List<Map<String, Object>> candidates = (List<Map<String, Object>>) response.get("candidates");
+                            if (!candidates.isEmpty()) {
+                                Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+                                List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
+                                if (!parts.isEmpty()) {
+                                    return (String) parts.get(0).get("text");
+                                }
+                            }
+                        }
+                        return null;
+                    })
+                    .block();
 
-        return parseResponse(llmResponse);
+            if (llmResponse == null || llmResponse.isEmpty()) {
+                logger.error("Gemini API returned an empty response.");
+                throw new RuntimeException("API issue: Empty response from Gemini API.");
+            }
+
+            return parseResponse(llmResponse);
+
+        } catch (WebClientResponseException e) {
+            logger.error("Gemini API request failed: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            System.out.println("API Issue: Unable to fetch data from Gemini API. Please check the logs.");
+            throw new RuntimeException("API issue: Failed to get response from Gemini API.", e);
+        } catch (ClassCastException e) {
+            logger.error("API response format error: {}", e.getMessage());
+            System.out.println("API Issue: Unexpected response structure from Gemini API.");
+            throw new RuntimeException("API issue: Incorrect response format from Gemini API.", e);
+        } catch (Exception e) {
+            logger.error("Unexpected error: {}", e.getMessage());
+            System.out.println("API Issue: Unexpected error while calling Gemini API.");
+            throw new RuntimeException("Unexpected error while calling Gemini API.", e);
+        }
     }
 
     private BankStatementDTO parseResponse(String llmResponse) {
