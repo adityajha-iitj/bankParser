@@ -5,12 +5,15 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -35,17 +38,25 @@ public class LLMIntegrationService {
                 .build();
     }
 
-    public BankStatementDTO extractBankStatementDetails(String extractedText) {
+    public BankStatementDTO extractBankStatementDetails(MultipartFile file) throws IOException {
+        // Encode PDF to Base64
+        String base64PDF = Base64.getEncoder().encodeToString(file.getBytes());
+
         String prompt = "Extract structured JSON with these bank statement details: " +
-                "Full Name, Email, Opening Balance, Closing Balance, Account Number (last 4 digits)\n\n" +
-                "Bank Statement Text:\n" + extractedText;
+                "Full Name, Email, Opening Balance, Closing Balance, Account Type\n\n" +
+                "Please provide the values, keeping it concise and precision. " +
+                "For account type, specify if it's Savings, Current, or other.";
 
         try {
             String llmResponse = webClient.post()
                     .bodyValue(Map.of(
                             "contents", new Object[]{
                                     Map.of("parts", new Object[]{
-                                            Map.of("text", prompt)
+                                            Map.of("text", prompt),
+                                            Map.of("inlineData", Map.of(
+                                                    "mimeType", "application/pdf",
+                                                    "data", base64PDF
+                                            ))
                                     })
                             }
                     ))
@@ -77,10 +88,6 @@ public class LLMIntegrationService {
             logger.error("Gemini API request failed: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
             System.out.println("API Issue: Unable to fetch data from Gemini API. Please check the logs.");
             throw new RuntimeException("API issue: Failed to get response from Gemini API.", e);
-        } catch (ClassCastException e) {
-            logger.error("API response format error: {}", e.getMessage());
-            System.out.println("API Issue: Unexpected response structure from Gemini API.");
-            throw new RuntimeException("API issue: Incorrect response format from Gemini API.", e);
         } catch (Exception e) {
             logger.error("Unexpected error: {}", e.getMessage());
             System.out.println("API Issue: Unexpected error while calling Gemini API.");
@@ -93,22 +100,35 @@ public class LLMIntegrationService {
 
         Pattern namePattern = Pattern.compile("\"Full Name\":\\s*\"([^\"]+)\"");
         Pattern emailPattern = Pattern.compile("\"Email\":\\s*\"([^\"]+)\"");
-        Pattern openingBalancePattern = Pattern.compile("\"Opening Balance\":\\s*\"?([\\d.]+)\"?");
-        Pattern closingBalancePattern = Pattern.compile("\"Closing Balance\":\\s*\"?([\\d.]+)\"?");
-        Pattern accountNumPattern = Pattern.compile("\"Account Number\":\\s*\"?([\\d]{4})\"?");
+
+        // Updated regex to handle more complex number formats
+        Pattern openingBalancePattern = Pattern.compile("\"Opening Balance\":\\s*\"?([\\d,]+(?:\\.\\d{2})?)\"?");
+        Pattern closingBalancePattern = Pattern.compile("\"Closing Balance\":\\s*\"?([\\d,]+(?:\\.\\d{2})?)\"?");
+
+        Pattern accountTypePattern = Pattern.compile("\"Account Type\":\\s*\"([^\"]+)\"");
 
         Matcher nameMatcher = namePattern.matcher(llmResponse);
         Matcher emailMatcher = emailPattern.matcher(llmResponse);
         Matcher openingBalanceMatcher = openingBalancePattern.matcher(llmResponse);
         Matcher closingBalanceMatcher = closingBalancePattern.matcher(llmResponse);
-        Matcher accountNumMatcher = accountNumPattern.matcher(llmResponse);
+        Matcher accountTypeMatcher = accountTypePattern.matcher(llmResponse);
 
         if (nameMatcher.find()) dto.setName(nameMatcher.group(1));
         if (emailMatcher.find()) dto.setEmail(emailMatcher.group(1));
-        if (openingBalanceMatcher.find()) dto.setOpeningBalance(new BigDecimal(openingBalanceMatcher.group(1)));
-        if (closingBalanceMatcher.find()) dto.setClosingBalance(new BigDecimal(closingBalanceMatcher.group(1)));
-        if (accountNumMatcher.find()) dto.setAccountNumberLastFourDigits(accountNumMatcher.group(1));
+        if (openingBalanceMatcher.find()) {
+            // Remove commas and parse
+            String balanceStr = openingBalanceMatcher.group(1).replace(",", "");
+            dto.setOpeningBalance(new BigDecimal(balanceStr));
+        }
 
+        if (closingBalanceMatcher.find()) {
+            // Remove commas and parse
+            String balanceStr = closingBalanceMatcher.group(1).replace(",", "");
+            dto.setClosingBalance(new BigDecimal(balanceStr));
+        }
+        if (accountTypeMatcher.find()) {
+            dto.setAccountType(accountTypeMatcher.group(1));
+        }
         return dto;
     }
 

@@ -2,34 +2,37 @@ package com.bankParser.util;
 
 import org.springframework.stereotype.Component;
 
-import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
 @Component
 public class PasswordGenerator {
 
-    private static final String CHAR_LOWERCASE = "abcdefghijklmnopqrstuvwxyz";
-    private static final String CHAR_UPPERCASE = CHAR_LOWERCASE.toUpperCase();
-    private static final String DIGIT = "0123456789";
-    private static final String PUNCTUATION = "!@#$%^&*()_+-=[]?";
-    private static final String ALL_CHARS = CHAR_LOWERCASE + CHAR_UPPERCASE + DIGIT + PUNCTUATION;
+    public String generatePassword(String firstName, LocalDate dateOfBirth, String accountType) {
 
-    public String generatePassword(String firstName, LocalDate dateOfBirth) {
-        SecureRandom random = new SecureRandom();
-        StringBuilder password = new StringBuilder();
-
-        // Use first name and DOB as seed
-        if (firstName != null && dateOfBirth != null) {
-            password.append(firstName.substring(0, Math.min(3, firstName.length())));
-            password.append(dateOfBirth.format(DateTimeFormatter.BASIC_ISO_DATE.ofPattern("MMdd")));
+        // Validate inputs
+        if (firstName == null || dateOfBirth == null) {
+            throw new IllegalArgumentException("First name, date of birth, and account type are required");
         }
 
-        // Add random characters to meet complexity
-        while (password.length() < 12) {
-            password.append(ALL_CHARS.charAt(random.nextInt(ALL_CHARS.length())));
+        String dobString = dateOfBirth.format(DateTimeFormatter.BASIC_ISO_DATE);
+
+        String firstNamePart = firstName.substring(0, Math.min(4, firstName.length())).toLowerCase();
+
+        //Account type suffix
+        if (accountType == null || accountType.isEmpty()) {
+            accountType = "other";
         }
 
-        return password.toString();
+        String accountSuffix = switch (accountType.toLowerCase()) {
+            case "savings" -> "sb";
+            case "current" -> "ca";
+            case "regular" -> "rg";
+            case "other" -> "ot";
+            default -> "ac";
+        };
+
+        // Combine all parts
+        return dobString + firstNamePart + accountSuffix;
     }
 }

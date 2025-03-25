@@ -17,7 +17,6 @@ public class BankStatementDTO {
     private String email;
     private BigDecimal openingBalance;
     private BigDecimal closingBalance;
+    private String accountType;
     private String generatedPassword;
-    private LocalDate statementDate;
-    private String accountNumberLastFourDigits;
 }
